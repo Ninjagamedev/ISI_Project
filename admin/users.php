@@ -17,10 +17,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt = $db->prepare("UPDATE users SET status = ? WHERE id = ?");
             $stmt->execute([$_POST['status'], $_POST['user_id']]);
             break;
-        case 'role':
-            $stmt = $db->prepare("UPDATE users SET role = ? WHERE id = ?");
-            $stmt->execute([$_POST['role'], $_POST['user_id']]);
-            break;
         case 'delete':
             $stmt = $db->prepare("DELETE FROM users WHERE id = ? AND role != 'admin'");
             $stmt->execute([$_POST['user_id']]);
@@ -116,7 +112,7 @@ $users = $stmt->fetchAll();
                                 <option value="">All Status</option>
                                 <option value="active" <?php echo $status === 'active' ? 'selected' : ''; ?>>Active</option>
                                 <option value="inactive" <?php echo $status === 'inactive' ? 'selected' : ''; ?>>Inactive</option>
-                                <option value="suspended" <?php echo $status === 'suspended' ? 'selected' : ''; ?>>Suspended</option>
+                                <option value="banned" <?php echo $status === 'banned' ? 'selected' : ''; ?>>Banned</option>
                             </select>
                         </div>
 
@@ -135,7 +131,7 @@ $users = $stmt->fetchAll();
                                 <th>Email</th>
                                 <th>Role</th>
                                 <th>Status</th>
-                                <th>Registered</th>
+                                <th>Joined</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -151,22 +147,9 @@ $users = $stmt->fetchAll();
                                     </td>
                                     <td><?php echo htmlspecialchars($user['email']); ?></td>
                                     <td>
-                                        <form method="POST" class="inline-form">
-                                            <input type="hidden" name="action" value="role">
-                                            <input type="hidden" name="user_id" value="<?php echo $user['id']; ?>">
-                                            <select name="role" onchange="this.form.submit()" 
-                                                    <?php echo $user['role'] === 'admin' ? 'disabled' : ''; ?>>
-                                                <option value="user" <?php echo $user['role'] === 'user' ? 'selected' : ''; ?>>
-                                                    User
-                                                </option>
-                                                <option value="vendor" <?php echo $user['role'] === 'vendor' ? 'selected' : ''; ?>>
-                                                    Vendor
-                                                </option>
-                                                <option value="admin" <?php echo $user['role'] === 'admin' ? 'selected' : ''; ?>>
-                                                    Admin
-                                                </option>
-                                            </select>
-                                        </form>
+                                        <span class="role-badge role-<?php echo $user['role']; ?>">
+                                            <?php echo ucfirst($user['role']); ?>
+                                        </span>
                                     </td>
                                     <td>
                                         <form method="POST" class="inline-form">
@@ -180,8 +163,8 @@ $users = $stmt->fetchAll();
                                                 <option value="inactive" <?php echo $user['status'] === 'inactive' ? 'selected' : ''; ?>>
                                                     Inactive
                                                 </option>
-                                                <option value="suspended" <?php echo $user['status'] === 'suspended' ? 'selected' : ''; ?>>
-                                                    Suspended
+                                                <option value="banned" <?php echo $user['status'] === 'banned' ? 'selected' : ''; ?>>
+                                                    Banned
                                                 </option>
                                             </select>
                                         </form>
@@ -190,7 +173,8 @@ $users = $stmt->fetchAll();
                                     <td>
                                         <div class="action-buttons">
                                             <a href="edit-user.php?id=<?php echo $user['id']; ?>" 
-                                               class="btn btn-small">Edit</a>
+                                               class="btn btn-small btn-secondary">Edit</a>
+                                            
                                             <?php if ($user['role'] !== 'admin'): ?>
                                                 <form method="POST" class="inline-form" 
                                                       onsubmit="return confirm('Are you sure you want to delete this user?')">
@@ -199,6 +183,9 @@ $users = $stmt->fetchAll();
                                                     <button type="submit" class="btn btn-small btn-danger">Delete</button>
                                                 </form>
                                             <?php endif; ?>
+                                            
+                                            <a href="user-orders.php?user_id=<?php echo $user['id']; ?>" 
+                                               class="btn btn-small btn-link">Orders</a>
                                         </div>
                                     </td>
                                 </tr>
@@ -210,12 +197,22 @@ $users = $stmt->fetchAll();
                 <!-- Pagination -->
                 <?php if ($total_pages > 1): ?>
                     <div class="pagination">
+                        <?php if ($page > 1): ?>
+                            <a href="?page=<?php echo $page - 1; ?>&search=<?php echo urlencode($search); ?>&role=<?php echo urlencode($role); ?>&status=<?php echo urlencode($status); ?>" 
+                               class="btn btn-secondary">Previous</a>
+                        <?php endif; ?>
+
                         <?php for ($i = 1; $i <= $total_pages; $i++): ?>
                             <a href="?page=<?php echo $i; ?>&search=<?php echo urlencode($search); ?>&role=<?php echo urlencode($role); ?>&status=<?php echo urlencode($status); ?>" 
-                               class="btn <?php echo $page === $i ? 'btn-primary' : 'btn-secondary'; ?>">
+                               class="btn <?php echo $i === $page ? 'btn-primary' : 'btn-secondary'; ?>">
                                 <?php echo $i; ?>
                             </a>
                         <?php endfor; ?>
+
+                        <?php if ($page < $total_pages): ?>
+                            <a href="?page=<?php echo $page + 1; ?>&search=<?php echo urlencode($search); ?>&role=<?php echo urlencode($role); ?>&status=<?php echo urlencode($status); ?>" 
+                               class="btn btn-secondary">Next</a>
+                        <?php endif; ?>
                     </div>
                 <?php endif; ?>
             </div>
