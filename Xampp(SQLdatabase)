@@ -1,5 +1,5 @@
 -- Create database
-CREATE DATABASE IF NOT EXISTS online_shop;
+CREATE DATABASE IF NOT EXISTS online_shop CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE online_shop;
 
 -- Users table
@@ -9,51 +9,193 @@ CREATE TABLE users (
     email VARCHAR(100) UNIQUE NOT NULL,
     password VARCHAR(255) NOT NULL,
     shipping_address TEXT NOT NULL,
+    role ENUM('customer', 'vendor', 'admin') DEFAULT 'customer',
+    language_preference VARCHAR(10) DEFAULT 'en',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Categories table
+CREATE TABLE categories (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(100) NOT NULL,
+    slug VARCHAR(100) UNIQUE NOT NULL,
+    parent_id INT NULL,
+    description TEXT,
+    meta_title VARCHAR(255),
+    meta_description TEXT,
+    FOREIGN KEY (parent_id) REFERENCES categories(id)
+);
+
+-- Shops table
+CREATE TABLE shops (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    vendor_id INT NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    slug VARCHAR(100) UNIQUE NOT NULL,
+    description TEXT,
+    logo_path VARCHAR(255),
+    contact_email VARCHAR(100),
+    contact_phone VARCHAR(20),
+    status ENUM('active', 'disabled') DEFAULT 'active',
+    meta_title VARCHAR(255),
+    meta_description TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (vendor_id) REFERENCES users(id)
 );
 
 -- Products table
 CREATE TABLE products (
     id INT PRIMARY KEY AUTO_INCREMENT,
-    product_id VARCHAR(20) UNIQUE NOT NULL,
+    shop_id INT NOT NULL,
     name VARCHAR(255) NOT NULL,
-    price DECIMAL(10,2) NOT NULL,
+    slug VARCHAR(255) UNIQUE NOT NULL,
     description TEXT,
-    thumbnail VARCHAR(255),
+    price DECIMAL(10,2) NOT NULL,
+    category_id INT,
+    is_configurable BOOLEAN DEFAULT FALSE,
     status ENUM('active', 'disabled') DEFAULT 'active',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    meta_title VARCHAR(255),
+    meta_description TEXT,
+    tags TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (shop_id) REFERENCES shops(id),
+    FOREIGN KEY (category_id) REFERENCES categories(id)
+);
+
+-- Product images table
+CREATE TABLE product_images (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    product_id INT NOT NULL,
+    image_path VARCHAR(255) NOT NULL,
+    alt_text VARCHAR(255),
+    is_primary BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (product_id) REFERENCES products(id)
+);
+
+-- Product options table
+CREATE TABLE product_options (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    product_id INT NOT NULL,
+    option_name VARCHAR(50) NOT NULL,
+    option_values TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (product_id) REFERENCES products(id)
+);
+
+-- Product inventory table
+CREATE TABLE product_inventory (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    product_id INT NOT NULL,
+    sku VARCHAR(50) UNIQUE NOT NULL,
+    option_combination TEXT,
+    stock_quantity INT DEFAULT 0,
+    status ENUM('in_stock', 'out_of_stock') DEFAULT 'out_of_stock',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (product_id) REFERENCES products(id)
 );
 
 -- Shopping cart table
 CREATE TABLE cart_items (
     id INT PRIMARY KEY AUTO_INCREMENT,
-    user_id INT,
-    product_id INT,
+    user_id INT NOT NULL,
+    product_id INT NOT NULL,
+    inventory_id INT NULL,
     quantity INT NOT NULL DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id),
-    FOREIGN KEY (product_id) REFERENCES products(id)
+    FOREIGN KEY (product_id) REFERENCES products(id),
+    FOREIGN KEY (inventory_id) REFERENCES product_inventory(id)
 );
 
 -- Orders table
 CREATE TABLE orders (
     id INT PRIMARY KEY AUTO_INCREMENT,
     order_number VARCHAR(20) UNIQUE NOT NULL,
-    user_id INT,
+    user_id INT NOT NULL,
+    shop_id INT NOT NULL,
     total_amount DECIMAL(10,2) NOT NULL,
-    status ENUM('pending', 'processing', 'shipped', 'delivered', 'cancelled') DEFAULT 'pending',
+    status ENUM('pending', 'processing', 'partially_shipped', 'shipped', 'delivered', 'cancelled') DEFAULT 'pending',
     shipping_address TEXT NOT NULL,
+    notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id)
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (shop_id) REFERENCES shops(id)
 );
 
 -- Order items table
 CREATE TABLE order_items (
     id INT PRIMARY KEY AUTO_INCREMENT,
-    order_id INT,
-    product_id INT,
+    order_id INT NOT NULL,
+    product_id INT NOT NULL,
+    inventory_id INT NULL,
     quantity INT NOT NULL,
     unit_price DECIMAL(10,2) NOT NULL,
+    status ENUM('pending', 'shipped', 'cancelled') DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (order_id) REFERENCES orders(id),
+    FOREIGN KEY (product_id) REFERENCES products(id),
+    FOREIGN KEY (inventory_id) REFERENCES product_inventory(id)
+);
+
+-- Shipments table
+CREATE TABLE shipments (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    order_id INT NOT NULL,
+    tracking_number VARCHAR(100),
+    status ENUM('pending', 'shipped', 'delivered') DEFAULT 'pending',
+    shipped_at TIMESTAMP NULL,
+    delivered_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (order_id) REFERENCES orders(id)
+);
+
+-- Reviews table
+CREATE TABLE reviews (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    product_id INT NOT NULL,
+    user_id INT NOT NULL,
+    rating INT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+    review_text TEXT,
+    status ENUM('pending', 'approved', 'rejected') DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (product_id) REFERENCES products(id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+-- Wishlist table
+CREATE TABLE wishlists (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    product_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id),
     FOREIGN KEY (product_id) REFERENCES products(id)
+);
+
+-- Promotions table
+CREATE TABLE promotions (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    shop_id INT NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    discount_type ENUM('percentage', 'fixed') NOT NULL,
+    discount_value DECIMAL(10,2) NOT NULL,
+    start_date TIMESTAMP NOT NULL,
+    end_date TIMESTAMP NOT NULL,
+    status ENUM('active', 'inactive') DEFAULT 'inactive',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (shop_id) REFERENCES shops(id)
+);
+
+-- Analytics events table
+CREATE TABLE analytics_events (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    event_type VARCHAR(50) NOT NULL,
+    user_id INT NULL,
+    session_id VARCHAR(100) NOT NULL,
+    page_url VARCHAR(255) NOT NULL,
+    event_data JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id)
 );
