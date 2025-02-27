@@ -6,15 +6,14 @@ require_once 'includes/ProductManager.php';
 $auth = Auth::getInstance();
 $product_manager = new ProductManager();
 
-$category_id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
-if (!$category_id) {
-    header('Location: index.php');
-    exit;
-}
+$category_id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+$page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
+$per_page = 12;
 
 // Get category details
-$db = Database::getInstance()->getConnection();
-$stmt = $db->prepare("SELECT * FROM categories WHERE id = ?");
+$stmt = Database::getInstance()->getConnection()->prepare("
+    SELECT * FROM categories WHERE id = ?
+");
 $stmt->execute([$category_id]);
 $category = $stmt->fetch();
 
@@ -23,43 +22,18 @@ if (!$category) {
     exit;
 }
 
-// Pagination
-$page = filter_input(INPUT_GET, 'page', FILTER_VALIDATE_INT) ?: 1;
-$items_per_page = 12;
-$offset = ($page - 1) * $items_per_page;
-
-// Filtering and sorting options
-$sort = filter_input(INPUT_GET, 'sort') ?: 'newest';
-$min_price = filter_input(INPUT_GET, 'min_price', FILTER_VALIDATE_FLOAT);
-$max_price = filter_input(INPUT_GET, 'max_price', FILTER_VALIDATE_FLOAT);
-$shop_id = filter_input(INPUT_GET, 'shop_id', FILTER_VALIDATE_INT);
-
-// Get products
+// Get filter parameters
 $filters = [
-    'category_id' => $category_id,
-    'min_price' => $min_price,
-    'max_price' => $max_price,
-    'shop_id' => $shop_id,
-    'sort' => $sort,
-    'offset' => $offset,
-    'limit' => $items_per_page
+    'min_price' => isset($_GET['min_price']) ? (float)$_GET['min_price'] : null,
+    'max_price' => isset($_GET['max_price']) ? (float)$_GET['max_price'] : null,
+    'sort' => isset($_GET['sort']) ? $_GET['sort'] : 'newest',
+    'shop_id' => isset($_GET['shop_id']) ? (int)$_GET['shop_id'] : null,
 ];
 
-$products = $product_manager->getProducts($filters);
-$total_products = $product_manager->getProductsCount($filters);
-$total_pages = ceil($total_products / $items_per_page);
-
-// Get available shops in this category
-$stmt = $db->prepare("
-    SELECT DISTINCT s.id, s.name, COUNT(p.id) as product_count
-    FROM shops s
-    JOIN products p ON s.id = p.shop_id
-    WHERE p.category_id = ? AND p.status = 'active'
-    GROUP BY s.id
-    ORDER BY product_count DESC
-");
-$stmt->execute([$category_id]);
-$shops = $stmt->fetchAll();
+// Get products
+$products = $product_manager->getCategoryProducts($category_id, $page, $per_page, $filters);
+$total_products = $product_manager->getCategoryProductCount($category_id, $filters);
+$total_pages = ceil($total_products / $per_page);
 ?>
 
 <!DOCTYPE html>
@@ -80,39 +54,40 @@ $shops = $stmt->fetchAll();
             <p><?php echo htmlspecialchars($category['description']); ?></p>
         </div>
 
-        <div class="category-content">
+        <div class="category-layout">
             <!-- Filters Sidebar -->
             <aside class="filters">
-                <form action="" method="GET" id="filter-form">
+                <form id="filter-form" method="GET" action="">
                     <input type="hidden" name="id" value="<?php echo $category_id; ?>">
                     
                     <div class="filter-section">
                         <h3>Price Range</h3>
                         <div class="price-range">
-                            <input type="number" name="min_price" 
-                                   value="<?php echo $min_price; ?>" 
-                                   placeholder="Min" step="0.01">
+                            <input type="number" name="min_price" placeholder="Min" 
+                                   value="<?php echo $filters['min_price']; ?>">
                             <span>to</span>
-                            <input type="number" name="max_price" 
-                                   value="<?php echo $max_price; ?>" 
-                                   placeholder="Max" step="0.01">
+                            <input type="number" name="max_price" placeholder="Max" 
+                                   value="<?php echo $filters['max_price']; ?>">
                         </div>
                     </div>
 
-                    <?php if (!empty($shops)): ?>
-                        <div class="filter-section">
-                            <h3>Shops</h3>
-                            <?php foreach ($shops as $s): ?>
-                                <label class="checkbox-label">
-                                    <input type="checkbox" name="shop_id[]" 
-                                           value="<?php echo $s['id']; ?>"
-                                           <?php echo $shop_id == $s['id'] ? 'checked' : ''; ?>>
-                                    <?php echo htmlspecialchars($s['name']); ?>
-                                    (<?php echo $s['product_count']; ?>)
-                                </label>
-                            <?php endforeach; ?>
-                        </div>
-                    <?php endif; ?>
+                    <div class="filter-section">
+                        <h3>Sort By</h3>
+                        <select name="sort">
+                            <option value="newest" <?php echo $filters['sort'] === 'newest' ? 'selected' : ''; ?>>
+                                Newest First
+                            </option>
+                            <option value="price_low" <?php echo $filters['sort'] === 'price_low' ? 'selected' : ''; ?>>
+                                Price: Low to High
+                            </option>
+                            <option value="price_high" <?php echo $filters['sort'] === 'price_high' ? 'selected' : ''; ?>>
+                                Price: High to Low
+                            </option>
+                            <option value="popular" <?php echo $filters['sort'] === 'popular' ? 'selected' : ''; ?>>
+                                Most Popular
+                            </option>
+                        </select>
+                    </div>
 
                     <button type="submit" class="btn btn-primary">Apply Filters</button>
                 </form>
@@ -121,25 +96,8 @@ $shops = $stmt->fetchAll();
             <!-- Products Grid -->
             <div class="products-section">
                 <div class="products-header">
-                    <div class="product-count">
-                        <?php echo $total_products; ?> products found
-                    </div>
-                    <div class="sort-options">
-                        <select name="sort" onchange="updateSort(this.value)">
-                            <option value="newest" <?php echo $sort === 'newest' ? 'selected' : ''; ?>>
-                                Newest First
-                            </option>
-                            <option value="price_low" <?php echo $sort === 'price_low' ? 'selected' : ''; ?>>
-                                Price: Low to High
-                            </option>
-                            <option value="price_high" <?php echo $sort === 'price_high' ? 'selected' : ''; ?>>
-                                Price: High to Low
-                            </option>
-                            <option value="popular" <?php echo $sort === 'popular' ? 'selected' : ''; ?>>
-                                Most Popular
-                            </option>
-                        </select>
-                    </div>
+                    <p>Showing <?php echo ($page - 1) * $per_page + 1; ?>-<?php echo min($page * $per_page, $total_products); ?> 
+                       of <?php echo $total_products; ?> products</p>
                 </div>
 
                 <div class="product-grid">
@@ -162,4 +120,62 @@ $shops = $stmt->fetchAll();
                                         <?php echo htmlspecialchars($product['shop_name']); ?>
                                     </a>
                                 </p>
-                                <div
+                                <div class="price-box">
+                                    <?php if ($product['sale_price']): ?>
+                                        <span class="original-price">
+                                            $<?php echo number_format($product['price'], 2); ?>
+                                        </span>
+                                        <span class="sale-price">
+                                            $<?php echo number_format($product['sale_price'], 2); ?>
+                                        </span>
+                                    <?php else: ?>
+                                        <span class="regular-price">
+                                            $<?php echo number_format($product['price'], 2); ?>
+                                        </span>
+                                    <?php endif; ?>
+                                </div>
+                                <div class="product-actions">
+                                    <a href="product.php?id=<?php echo $product['id']; ?>" 
+                                       class="btn btn-primary">View Details</a>
+                                    <?php if ($auth->isLoggedIn()): ?>
+                                        <button class="btn btn-secondary add-to-wishlist" 
+                                                data-product-id="<?php echo $product['id']; ?>">
+                                            ♡
+                                        </button>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+
+                <!-- Pagination -->
+                <?php if ($total_pages > 1): ?>
+                    <div class="pagination">
+                        <?php if ($page > 1): ?>
+                            <a href="?id=<?php echo $category_id; ?>&page=<?php echo $page - 1; ?>" 
+                               class="btn btn-secondary">Previous</a>
+                        <?php endif; ?>
+                        
+                        <?php for ($i = 1; $i <= $total_pages; $i++): ?>
+                            <a href="?id=<?php echo $category_id; ?>&page=<?php echo $i; ?>" 
+                               class="btn <?php echo $i === $page ? 'btn-primary' : 'btn-secondary'; ?>">
+                                <?php echo $i; ?>
+                            </a>
+                        <?php endfor; ?>
+                        
+                        <?php if ($page < $total_pages): ?>
+                            <a href="?id=<?php echo $category_id; ?>&page=<?php echo $page + 1; ?>" 
+                               class="btn btn-secondary">Next</a>
+                        <?php endif; ?>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+    </main>
+
+    <?php include 'templates/footer.php'; ?>
+
+    <script src="assets/js/category.js"></script>
+</body>
+</html>
