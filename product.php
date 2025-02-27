@@ -6,13 +6,9 @@ require_once 'includes/ProductManager.php';
 $auth = Auth::getInstance();
 $product_manager = new ProductManager();
 
-$product_id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
-if (!$product_id) {
-    header('Location: index.php');
-    exit;
-}
-
+$product_id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 $product = $product_manager->getProduct($product_id);
+
 if (!$product) {
     header('Location: index.php');
     exit;
@@ -25,7 +21,7 @@ $images = $product_manager->getProductImages($product_id);
 $options = $product_manager->getProductOptions($product_id);
 
 // Get related products
-$related_products = $product_manager->getRelatedProducts($product_id);
+$related_products = $product_manager->getRelatedProducts($product_id, 4);
 
 // Get product reviews
 $reviews = $product_manager->getProductReviews($product_id);
@@ -38,7 +34,7 @@ $avg_rating = $product_manager->getAverageRating($product_id);
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?php echo htmlspecialchars($product['name']); ?> - Online Shop</title>
-    <meta name="description" content="<?php echo htmlspecialchars($product['meta_description']); ?>">
+    <meta name="description" content="<?php echo htmlspecialchars($product['meta_description'] ?? $product['description']); ?>">
     <link rel="stylesheet" href="assets/css/style.css">
     <link rel="stylesheet" href="assets/css/product.css">
 </head>
@@ -50,17 +46,17 @@ $avg_rating = $product_manager->getAverageRating($product_id);
             <!-- Product Images -->
             <div class="product-gallery">
                 <div class="main-image">
-                    <img src="<?php echo htmlspecialchars($images[0]['image_path']); ?>" 
-                         alt="<?php echo htmlspecialchars($product['name']); ?>"
-                         id="main-product-image">
+                    <img id="main-product-image" 
+                         src="<?php echo htmlspecialchars($images[0]['image_path']); ?>" 
+                         alt="<?php echo htmlspecialchars($product['name']); ?>">
                 </div>
                 <?php if (count($images) > 1): ?>
                     <div class="thumbnail-list">
                         <?php foreach ($images as $image): ?>
-                            <img src="<?php echo htmlspecialchars($image['image_path']); ?>"
-                                 alt="Product thumbnail"
-                                 onclick="updateMainImage(this.src)"
-                                 class="thumbnail">
+                            <div class="thumbnail" onclick="updateMainImage('<?php echo htmlspecialchars($image['image_path']); ?>')">
+                                <img src="<?php echo htmlspecialchars($image['image_path']); ?>" 
+                                     alt="<?php echo htmlspecialchars($product['name']); ?>">
+                            </div>
                         <?php endforeach; ?>
                     </div>
                 <?php endif; ?>
@@ -70,47 +66,47 @@ $avg_rating = $product_manager->getAverageRating($product_id);
             <div class="product-info">
                 <h1><?php echo htmlspecialchars($product['name']); ?></h1>
                 
-                <div class="shop-info">
-                    <a href="shop.php?id=<?php echo $product['shop_id']; ?>">
-                        <?php echo htmlspecialchars($product['shop_name']); ?>
-                    </a>
-                </div>
-
-                <div class="rating">
-                    <?php for ($i = 1; $i <= 5; $i++): ?>
-                        <span class="star <?php echo $i <= $avg_rating ? 'filled' : ''; ?>">★</span>
-                    <?php endfor; ?>
-                    <span class="review-count">(<?php echo count($reviews); ?> reviews)</span>
-                </div>
-
-                <div class="price">
-                    $<?php echo number_format($product['price'], 2); ?>
-                </div>
-
-                <?php if ($product['sale_price']): ?>
-                    <div class="sale-price">
-                        Sale: $<?php echo number_format($product['sale_price'], 2); ?>
+                <div class="product-meta">
+                    <div class="rating">
+                        <?php for ($i = 1; $i <= 5; $i++): ?>
+                            <span class="star <?php echo $i <= $avg_rating ? 'filled' : ''; ?>">★</span>
+                        <?php endfor; ?>
+                        <span class="review-count">(<?php echo count($reviews); ?> reviews)</span>
                     </div>
-                <?php endif; ?>
+                    <div class="shop-info">
+                        Sold by: <a href="shop.php?id=<?php echo $product['shop_id']; ?>">
+                            <?php echo htmlspecialchars($product['shop_name']); ?>
+                        </a>
+                    </div>
+                </div>
 
-                <form id="add-to-cart-form" action="cart.php" method="POST">
-                    <input type="hidden" name="product_id" value="<?php echo $product['id']; ?>">
+                <div class="price-box">
+                    <?php if ($product['sale_price']): ?>
+                        <span class="original-price">$<?php echo number_format($product['price'], 2); ?></span>
+                        <span class="sale-price">$<?php echo number_format($product['sale_price'], 2); ?></span>
+                    <?php else: ?>
+                        <span class="regular-price">$<?php echo number_format($product['price'], 2); ?></span>
+                    <?php endif; ?>
+                </div>
+
+                <div class="product-description">
+                    <?php echo nl2br(htmlspecialchars($product['description'])); ?>
+                </div>
+
+                <form id="add-to-cart-form" class="product-options">
+                    <input type="hidden" name="product_id" value="<?php echo $product_id; ?>">
                     
-                    <?php if (!empty($options)): ?>
+                    <?php if ($options): ?>
                         <?php foreach ($options as $option): ?>
-                            <div class="product-option">
-                                <label for="option-<?php echo $option['id']; ?>">
-                                    <?php echo htmlspecialchars($option['name']); ?>:
-                                </label>
-                                <select name="options[<?php echo $option['id']; ?>]" 
-                                        id="option-<?php echo $option['id']; ?>"
-                                        required>
+                            <div class="option-group">
+                                <label><?php echo htmlspecialchars($option['name']); ?>:</label>
+                                <select name="options[<?php echo $option['id']; ?>]" required>
                                     <option value="">Select <?php echo htmlspecialchars($option['name']); ?></option>
                                     <?php foreach ($option['values'] as $value): ?>
                                         <option value="<?php echo $value['id']; ?>"
-                                                data-stock="<?php echo $value['stock_quantity']; ?>">
+                                                data-price="<?php echo $value['price_adjustment']; ?>">
                                             <?php echo htmlspecialchars($value['value']); ?>
-                                            <?php if ($value['price_adjustment'] > 0): ?>
+                                            <?php if ($value['price_adjustment']): ?>
                                                 (+$<?php echo number_format($value['price_adjustment'], 2); ?>)
                                             <?php endif; ?>
                                         </option>
@@ -120,72 +116,51 @@ $avg_rating = $product_manager->getAverageRating($product_id);
                         <?php endforeach; ?>
                     <?php endif; ?>
 
-                    <div class="quantity">
-                        <label for="quantity">Quantity:</label>
-                        <input type="number" name="quantity" id="quantity" 
-                               value="1" min="1" max="<?php echo $product['stock_quantity']; ?>">
+                    <div class="quantity-selector">
+                        <label>Quantity:</label>
+                        <div class="quantity-controls">
+                            <button type="button" onclick="updateQuantity(-1)">-</button>
+                            <input type="number" name="quantity" value="1" min="1" 
+                                   max="<?php echo $product['stock_quantity']; ?>">
+                            <button type="button" onclick="updateQuantity(1)">+</button>
+                        </div>
+                        <span class="stock-info">
+                            <?php echo $product['stock_quantity']; ?> items available
+                        </span>
                     </div>
 
                     <div class="product-actions">
-                        <button type="submit" class="btn btn-primary"
-                                <?php echo $product['stock_quantity'] < 1 ? 'disabled' : ''; ?>>
-                            <?php echo $product['stock_quantity'] < 1 ? 'Out of Stock' : 'Add to Cart'; ?>
-                        </button>
+                        <button type="submit" class="btn btn-primary">Add to Cart</button>
                         <?php if ($auth->isLoggedIn()): ?>
-                            <button type="button" class="btn btn-secondary add-to-wishlist"
-                                    data-product-id="<?php echo $product['id']; ?>">
+                            <button type="button" class="btn btn-secondary add-to-wishlist" 
+                                    data-product-id="<?php echo $product_id; ?>">
                                 Add to Wishlist
                             </button>
                         <?php endif; ?>
                     </div>
                 </form>
-
-                <div class="product-description">
-                    <h2>Product Description</h2>
-                    <?php echo nl2br(htmlspecialchars($product['description'])); ?>
-                </div>
-
-                <!-- Product Specifications -->
-                <?php if (!empty($product['specifications'])): ?>
-                    <div class="product-specifications">
-                        <h2>Specifications</h2>
-                        <table>
-                            <?php foreach (json_decode($product['specifications'], true) as $spec): ?>
-                                <tr>
-                                    <th><?php echo htmlspecialchars($spec['name']); ?></th>
-                                    <td><?php echo htmlspecialchars($spec['value']); ?></td>
-                                </tr>
-                            <?php endforeach; ?>
-                        </table>
-                    </div>
-                <?php endif; ?>
             </div>
         </div>
 
-        <!-- Reviews Section -->
+        <!-- Product Reviews -->
         <section class="product-reviews">
             <h2>Customer Reviews</h2>
             
             <?php if ($auth->isLoggedIn()): ?>
-                <button class="btn btn-secondary" onclick="showReviewForm()">
-                    Write a Review
-                </button>
+                <button class="btn btn-secondary" onclick="showReviewForm()">Write a Review</button>
                 
-                <form id="review-form" style="display: none;" action="submit-review.php" method="POST">
-                    <input type="hidden" name="product_id" value="<?php echo $product['id']; ?>">
-                    <div class="form-group">
-                        <label for="rating">Rating:</label>
-                        <div class="rating-input">
-                            <?php for ($i = 5; $i >= 1; $i--): ?>
-                                <input type="radio" name="rating" value="<?php echo $i; ?>" 
-                                       id="star<?php echo $i; ?>" required>
-                                <label for="star<?php echo $i; ?>">★</label>
-                            <?php endfor; ?>
-                        </div>
+                <form id="review-form" style="display: none;" class="review-form">
+                    <input type="hidden" name="product_id" value="<?php echo $product_id; ?>">
+                    <div class="rating-input">
+                        <label>Your Rating:</label>
+                        <?php for ($i = 5; $i >= 1; $i--): ?>
+                            <input type="radio" name="rating" value="<?php echo $i; ?>" required>
+                            <label class="star">★</label>
+                        <?php endfor; ?>
                     </div>
                     <div class="form-group">
-                        <label for="review">Your Review:</label>
-                        <textarea name="review" id="review" required></textarea>
+                        <label>Your Review:</label>
+                        <textarea name="review" required></textarea>
                     </div>
                     <button type="submit" class="btn btn-primary">Submit Review</button>
                 </form>
@@ -193,21 +168,17 @@ $avg_rating = $product_manager->getAverageRating($product_id);
 
             <div class="reviews-list">
                 <?php foreach ($reviews as $review): ?>
-                    <div class="review">
+                    <div class="review-item">
                         <div class="review-header">
-                            <div class="rating">
+                            <div class="review-rating">
                                 <?php for ($i = 1; $i <= 5; $i++): ?>
-                                    <span class="star <?php echo $i <= $review['rating'] ? 'filled' : ''; ?>">
-                                        ★
-                                    </span>
+                                    <span class="star <?php echo $i <= $review['rating'] ? 'filled' : ''; ?>">★</span>
                                 <?php endfor; ?>
                             </div>
-                            <span class="reviewer">
-                                <?php echo htmlspecialchars($review['user_name']); ?>
-                            </span>
-                            <span class="review-date">
-                                <?php echo date('M d, Y', strtotime($review['created_at'])); ?>
-                            </span>
+                            <div class="review-meta">
+                                by <?php echo htmlspecialchars($review['user_name']); ?>
+                                on <?php echo date('M d, Y', strtotime($review['created_at'])); ?>
+                            </div>
                         </div>
                         <div class="review-content">
                             <?php echo nl2br(htmlspecialchars($review['review'])); ?>
@@ -218,7 +189,7 @@ $avg_rating = $product_manager->getAverageRating($product_id);
         </section>
 
         <!-- Related Products -->
-        <?php if (!empty($related_products)): ?>
+        <?php if ($related_products): ?>
             <section class="related-products">
                 <h2>Related Products</h2>
                 <div class="product-grid">
@@ -235,6 +206,8 @@ $avg_rating = $product_manager->getAverageRating($product_id);
                                     </a>
                                 </h3>
                                 <p class="price">$<?php echo number_format($related['price'], 2); ?></p>
+                                <a href="product.php?id=<?php echo $related['id']; ?>" 
+                                   class="btn btn-secondary">View Details</a>
                             </div>
                         </div>
                     <?php endforeach; ?>
