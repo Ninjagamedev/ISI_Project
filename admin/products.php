@@ -9,6 +9,7 @@ if (!$auth->isLoggedIn() || !$auth->isAdmin()) {
     exit;
 }
 
+$db = Database::getInstance()->getConnection();
 $product_manager = new ProductManager();
 
 // Handle product actions
@@ -28,30 +29,68 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // Pagination
 $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
 $per_page = 20;
+$offset = ($page - 1) * $per_page;
 
 // Filters
 $search = isset($_GET['search']) ? $_GET['search'] : '';
-$category_id = isset($_GET['category_id']) ? (int)$_GET['category_id'] : 0;
-$shop_id = isset($_GET['shop_id']) ? (int)$_GET['shop_id'] : 0;
+$category = isset($_GET['category']) ? $_GET['category'] : '';
+$shop = isset($_GET['shop']) ? $_GET['shop'] : '';
 $status = isset($_GET['status']) ? $_GET['status'] : '';
 $stock = isset($_GET['stock']) ? $_GET['stock'] : '';
 
-$filters = [
-    'search' => $search,
-    'category_id' => $category_id,
-    'shop_id' => $shop_id,
-    'status' => $status,
-    'stock' => $stock
-];
+// Build query
+$query = "
+    SELECT p.*, c.name as category_name, s.name as shop_name, 
+           (SELECT image_path FROM product_images WHERE product_id = p.id AND is_primary = 1 LIMIT 1) as image_path
+    FROM products p
+    LEFT JOIN categories c ON p.category_id = c.id
+    LEFT JOIN shops s ON p.shop_id = s.id
+    WHERE 1=1
+";
+$params = [];
 
-// Get products
-$products = $product_manager->getProducts($filters, $page, $per_page);
-$total_products = $product_manager->getProductCount($filters);
+if ($search) {
+    $query .= " AND (p.name LIKE ? OR p.sku LIKE ?)";
+    $params[] = "%$search%";
+    $params[] = "%$search%";
+}
+
+if ($category) {
+    $query .= " AND p.category_id = ?";
+    $params[] = $category;
+}
+
+if ($shop) {
+    $query .= " AND p.shop_id = ?";
+    $params[] = $shop;
+}
+
+if ($status) {
+    $query .= " AND p.status = ?";
+    $params[] = $status;
+}
+
+if ($stock === 'low') {
+    $query .= " AND p.stock_quantity <= p.low_stock_threshold";
+} elseif ($stock === 'out') {
+    $query .= " AND p.stock_quantity = 0";
+}
+
+// Get total count
+$count_stmt = $db->prepare(str_replace('SELECT p.*', 'SELECT COUNT(*)', $query));
+$count_stmt->execute($params);
+$total_products = $count_stmt->fetchColumn();
 $total_pages = ceil($total_products / $per_page);
 
+// Get products
+$query .= " ORDER BY p.created_at DESC LIMIT $offset, $per_page";
+$stmt = $db->prepare($query);
+$stmt->execute($params);
+$products = $stmt->fetchAll();
+
 // Get categories and shops for filters
-$categories = $product_manager->getAllCategories();
-$shops = $product_manager->getAllShops();
+$categories = $db->query("SELECT id, name FROM categories ORDER BY name")->fetchAll();
+$shops = $db->query("SELECT id, name FROM shops ORDER BY name")->fetchAll();
 ?>
 
 <!DOCTYPE html>
@@ -84,24 +123,24 @@ $shops = $product_manager->getAllShops();
                         </div>
 
                         <div class="form-group">
-                            <select name="category_id">
+                            <select name="category">
                                 <option value="">All Categories</option>
-                                <?php foreach ($categories as $category): ?>
-                                    <option value="<?php echo $category['id']; ?>" 
-                                            <?php echo $category_id === $category['id'] ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($category['name']); ?>
+                                <?php foreach ($categories as $cat): ?>
+                                    <option value="<?php echo $cat['id']; ?>" 
+                                            <?php echo $category == $cat['id'] ? 'selected' : ''; ?>>
+                                        <?php echo htmlspecialchars($cat['name']); ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
                         </div>
 
                         <div class="form-group">
-                            <select name="shop_id">
+                            <select name="shop">
                                 <option value="">All Shops</option>
-                                <?php foreach ($shops as $shop): ?>
-                                    <option value="<?php echo $shop['id']; ?>" 
-                                            <?php echo $shop_id === $shop['id'] ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($shop['name']); ?>
+                                <?php foreach ($shops as $s): ?>
+                                    <option value="<?php echo $s['id']; ?>" 
+                                            <?php echo $shop == $s['id'] ? 'selected' : ''; ?>>
+                                        <?php echo htmlspecialchars($s['name']); ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
@@ -110,27 +149,17 @@ $shops = $product_manager->getAllShops();
                         <div class="form-group">
                             <select name="status">
                                 <option value="">All Status</option>
-                                <option value="active" <?php echo $status === 'active' ? 'selected' : ''; ?>>
-                                    Active
-                                </option>
-                                <option value="inactive" <?php echo $status === 'inactive' ? 'selected' : ''; ?>>
-                                    Inactive
-                                </option>
+                                <option value="active" <?php echo $status === 'active' ? 'selected' : ''; ?>>Active</option>
+                                <option value="inactive" <?php echo $status === 'inactive' ? 'selected' : ''; ?>>Inactive</option>
+                                <option value="draft" <?php echo $status === 'draft' ? 'selected' : ''; ?>>Draft</option>
                             </select>
                         </div>
 
                         <div class="form-group">
                             <select name="stock">
                                 <option value="">All Stock</option>
-                                <option value="in_stock" <?php echo $stock === 'in_stock' ? 'selected' : ''; ?>>
-                                    In Stock
-                                </option>
-                                <option value="low_stock" <?php echo $stock === 'low_stock' ? 'selected' : ''; ?>>
-                                    Low Stock
-                                </option>
-                                <option value="out_of_stock" <?php echo $stock === 'out_of_stock' ? 'selected' : ''; ?>>
-                                    Out of Stock
-                                </option>
+                                <option value="low" <?php echo $stock === 'low' ? 'selected' : ''; ?>>Low Stock</option>
+                                <option value="out" <?php echo $stock === 'out' ? 'selected' : ''; ?>>Out of Stock</option>
                             </select>
                         </div>
 
@@ -144,8 +173,9 @@ $shops = $product_manager->getAllShops();
                     <table class="admin-table">
                         <thead>
                             <tr>
-                                <th>ID</th>
-                                <th>Product</th>
+                                <th>Image</th>
+                                <th>Name</th>
+                                <th>SKU</th>
                                 <th>Category</th>
                                 <th>Shop</th>
                                 <th>Price</th>
@@ -157,44 +187,21 @@ $shops = $product_manager->getAllShops();
                         <tbody>
                             <?php foreach ($products as $product): ?>
                                 <tr>
-                                    <td><?php echo $product['id']; ?></td>
                                     <td>
-                                        <div class="product-info">
+                                        <?php if ($product['image_path']): ?>
                                             <img src="<?php echo htmlspecialchars($product['image_path']); ?>" 
                                                  alt="<?php echo htmlspecialchars($product['name']); ?>" 
                                                  class="product-thumbnail">
-                                            <div>
-                                                <strong><?php echo htmlspecialchars($product['name']); ?></strong>
-                                                <small>SKU: <?php echo htmlspecialchars($product['sku']); ?></small>
-                                            </div>
-                                        </div>
-                                    </td>
-                                    <td><?php echo htmlspecialchars($product['category_name']); ?></td>
-                                    <td><?php echo htmlspecialchars($product['shop_name']); ?></td>
-                                    <td>
-                                        $<?php echo number_format($product['price'], 2); ?>
-                                        <?php if ($product['sale_price']): ?>
-                                            <br>
-                                            <span class="sale-price">
-                                                $<?php echo number_format($product['sale_price'], 2); ?>
-                                            </span>
                                         <?php endif; ?>
                                     </td>
+                                    <td><?php echo htmlspecialchars($product['name']); ?></td>
+                                    <td><?php echo htmlspecialchars($product['sku']); ?></td>
+                                    <td><?php echo htmlspecialchars($product['category_name']); ?></td>
+                                    <td><?php echo htmlspecialchars($product['shop_name']); ?></td>
+                                    <td>$<?php echo number_format($product['price'], 2); ?></td>
                                     <td>
-                                        <span class="stock-level <?php echo $product['stock_quantity'] <= $product['low_stock_threshold'] ? 'low-stock' : ''; ?>">
+                                        <span class="<?php echo $product['stock_quantity'] <= $product['low_stock_threshold'] ? 'stock-warning' : ''; ?>">
                                             <?php echo $product['stock_quantity']; ?>
                                         </span>
                                     </td>
-                                    <td>
-                                        <span class="status-badge status-<?php echo $product['status']; ?>">
-                                            <?php echo ucfirst($product['status']); ?>
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <div class="action-buttons">
-                                            <a href="edit-product.php?id=<?php echo $product['id']; ?>" 
-                                               class="btn btn-small">Edit</a>
-                                            
-                                            <form method="POST" class="inline-form">
-                                                <input type="hidden" name="action" value="status">
-                                                <input type="hidden" name="product_id" value="<?php echo $product
+                                    <t
